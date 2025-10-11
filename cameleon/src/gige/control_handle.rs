@@ -4,7 +4,6 @@
 
 use std::{
     convert::TryInto,
-    io::Read,
     sync::{Arc, Mutex},
     thread,
     time::{self},
@@ -184,17 +183,12 @@ impl DeviceControl for ControlHandle {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpenMode {
+    #[default]
     Exclusive,
     Control,
     MonitorAccess,
-}
-
-impl Default for OpenMode {
-    fn default() -> Self {
-        OpenMode::Exclusive
-    }
 }
 
 macro_rules! align {
@@ -428,7 +422,7 @@ impl DeviceControl for ControlHandleInner {
         ack.iter()
             .next()
             .ok_or_else(|| ControlError::Io(anyhow::Error::msg("no entry in `ReadReg` ack packet")))
-            .map(|v| *v)
+            .copied()
     }
 
     fn write_mem(&mut self, mut address: u64, data: &[u8]) -> ControlResult<()> {
@@ -665,6 +659,6 @@ where
 fn assert_open<Ctrl: DeviceControl>(device: Ctrl) -> ControlResult<()> {
     device
         .is_opened()
-        .then(|| ())
+        .then_some(())
         .ok_or(ControlError::NotOpened)
 }
