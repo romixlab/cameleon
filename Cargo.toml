@@ -1,5 +1,6 @@
 [workspace]
 members = ["device", "cameleon", "gentl", "genapi", "impl"]
+exclude = ["examples"] # to avoid introducting large number of dependencies into workspace
 
 [workspace.metadata.release]
 # Use single tag for all crates (config for `cargo release`):
