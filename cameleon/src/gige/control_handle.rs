@@ -516,7 +516,10 @@ impl DeviceControl for ControlHandleInner {
                 let request = ureq::get(&url);
                 let mut response = request.call().map_err(|err| ControlError::Io(err.into()))?;
                 if response.status() == 200 {
-                    let buf = response.body_mut().read_to_vec().map_err(|err| ControlError::Io(err.into()))?;
+                    let buf = response
+                        .body_mut()
+                        .read_to_vec()
+                        .map_err(|err| ControlError::Io(err.into()))?;
                     (buf, compression_type)
                 } else {
                     return Err(ControlError::Io(anyhow::Error::msg(format!(

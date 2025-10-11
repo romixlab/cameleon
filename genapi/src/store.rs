@@ -4,9 +4,6 @@
 
 use std::{collections::HashMap, convert::TryFrom};
 
-use auto_impl::auto_impl;
-use string_interner::{StringInterner, Symbol};
-use string_interner::backend::StringBackend;
 use super::{
     builder,
     interface::{
@@ -19,6 +16,9 @@ use super::{
     IntSwissKnifeNode, IntegerNode, MaskedIntRegNode, Node, PortNode, RegisterNode, StringNode,
     StringRegNode, SwissKnifeNode,
 };
+use auto_impl::auto_impl;
+use string_interner::backend::StringBackend;
+use string_interner::{StringInterner, Symbol};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeId(u32);
