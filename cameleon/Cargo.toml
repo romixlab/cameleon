@@ -16,12 +16,12 @@ keywords = ["genicam", "camera", "usb3", "gige", "uvc"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-thiserror = "1.0.24"
+thiserror = "2.0"
 semver = "1.0.0"
-zip = { version = "0.6.0", default-features = false, features = ["deflate"] }
+zip = { version = "6.0", default-features = false, features = ["deflate"] }
 sha-1 = "0.10.0"
 async-std = "1.13.0"
-async-channel = "1.7.0" # 1.7.0 has added recv_blocking()
+async-channel = "2.5" # 1.7.0 has added recv_blocking()
 futures-channel = "0.3.16"
 futures-util = { version = "0.3.16", features = ["async-await"] }
 tracing = "0.1.26"
@@ -30,7 +30,7 @@ cameleon-device = { path = "../device", version = "0.1.14" }
 cameleon-genapi = { path = "../genapi", version = "0.1.14" }
 cameleon-impl = { path = "../impl", version = "0.1.0" }
 anyhow = "1.0.40"
-ureq = "2.1"
+ureq = "3.1"
 
 [dev-dependencies]
 trybuild = "1.0.42"
