@@ -20,7 +20,7 @@ thiserror = "1.0.24"
 semver = "1.0.0"
 zip = { version = "0.6.0", default-features = false, features = ["deflate"] }
 sha-1 = "0.10.0"
-async-std = "1.7.0"
+async-std = "1.13.0"
 async-channel = "1.7.0" # 1.7.0 has added recv_blocking()
 futures-channel = "0.3.16"
 futures-util = { version = "0.3.16", features = ["async-await"] }
@@ -34,6 +34,7 @@ ureq = "2.1"
 
 [dev-dependencies]
 trybuild = "1.0.42"
+anyhow = "1.0"
 
 [features]
 libusb = ["cameleon-device/libusb"]
@@ -41,6 +42,11 @@ libusb = ["cameleon-device/libusb"]
 [[example]]
 name = "u3v_register_map"
 path = "examples/u3v/register_map.rs"
+required-features = ["libusb"]
+
+[[example]]
+name = "gige_register_map"
+path = "examples/gige/find_cameras.rs"
 required-features = ["libusb"]
 
 [[example]]
