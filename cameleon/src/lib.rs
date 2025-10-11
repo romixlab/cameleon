@@ -292,12 +292,12 @@ mod tests {
     // Taken from https://stackoverflow.com/a/32765782/4345715
     // Can be replaced by https://crates.io/crates/static_assertions
     const _: () = {
-        fn assert_send<T: Send>() {}
-        fn assert_sync<T: Sync>() {}
+        fn _assert_send<T: Send>() {}
+        fn _assert_sync<T: Sync>() {}
 
-        fn assert_cameleon_error_is_send_sync() {
-            assert_send::<CameleonError>();
-            assert_sync::<CameleonError>();
+        fn _assert_cameleon_error_is_send_sync() {
+            _assert_send::<CameleonError>();
+            _assert_sync::<CameleonError>();
         }
     };
 }
