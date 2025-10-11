@@ -275,7 +275,7 @@ pub enum StreamError {
 
 impl From<TryFromIntError> for ControlError {
     fn from(e: TryFromIntError) -> Self {
-        Self::InvalidDevice(format!("internal data has invalid num type: {}", e).into())
+        Self::InvalidDevice(format!("internal data has invalid num type: {e}").into())
     }
 }
 

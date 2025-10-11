@@ -157,7 +157,7 @@ impl Expr {
                 .get(s.as_str())
                 .ok_or_else(|| {
                     GenApiError::invalid_node(
-                        format!("ident not found in variable env: {} not found", s).into(),
+                        format!("ident not found in variable env: {s} not found").into(),
                     )
                 })?
                 .borrow()
@@ -375,7 +375,7 @@ macro_rules! parse_binop {
     }
 }
 
-impl<'a> Parser<'a> {
+impl Parser<'_> {
     fn expr(&mut self) -> Expr {
         let expr = self.logical_or();
         if self.eat(&Token::Question) {
@@ -816,7 +816,7 @@ impl<'a> Lexer<'a> {
     fn peek_char_raw(&self, c: char, n: usize) -> bool {
         self.src
             .get(self.cur + n)
-            .map_or(false, |next| c == *next as char)
+            .is_some_and(|next| c == *next as char)
     }
 
     fn sub_string(&self, start_pos: usize, end_pos: usize) -> &str {

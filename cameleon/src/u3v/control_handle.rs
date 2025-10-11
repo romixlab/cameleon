@@ -397,6 +397,10 @@ impl DeviceControl for ControlHandle {
     }
 
     fn genapi(&mut self) -> ControlResult<String> {
+        fn zip_err(err: impl std::fmt::Debug) -> ControlError {
+            ControlError::InvalidDevice(format!("zipped xml file is broken: {err:?}").into())
+        }
+
         let table = unwrap_or_log!(self.manifest_table());
         // Use newest version if there are more than one entries.
         let mut newest_ent = None;

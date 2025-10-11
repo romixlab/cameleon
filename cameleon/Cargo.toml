@@ -1,6 +1,6 @@
 [package]
 name = "cameleon"
-version = "0.1.13"
+version = "0.1.14"
 authors = ["Cameleon Project Developers"]
 edition = "2018"
 license = "MPL-2.0"
@@ -26,8 +26,8 @@ futures-channel = "0.3.16"
 futures-util = { version = "0.3.16", features = ["async-await"] }
 tracing = "0.1.26"
 auto_impl = "1.0.1"
-cameleon-device = { path = "../device", version = "0.1.13" }
-cameleon-genapi = { path = "../genapi", version = "0.1.13" }
+cameleon-device = { path = "../device", version = "0.1.14" }
+cameleon-genapi = { path = "../genapi", version = "0.1.14" }
 cameleon-impl = { path = "../impl", version = "0.1.0" }
 anyhow = "1.0.40"
 ureq = "2.1"
