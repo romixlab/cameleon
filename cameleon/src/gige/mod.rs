@@ -8,20 +8,14 @@ pub mod stream_handle;
 
 pub use control_handle::ControlHandle;
 pub use stream_handle::StreamHandle;
-use stream_handle::StreamParams;
 
-use std::{
-    net::{Ipv4Addr, UdpSocket},
-    time,
-};
+use std::{net::Ipv4Addr, time};
 
 use cameleon_device::gige::{self};
 
-use crate::{ControlError, StreamError};
+use crate::ControlError;
 
-use async_std::task;
-
-use super::{CameleonResult, Camera, CameraInfo};
+use super::{CameleonResult, Camera};
 
 const ENUMERATION_TIMEOUT: time::Duration = time::Duration::from_millis(500);
 
@@ -31,32 +25,24 @@ impl From<gige::Error> for ControlError {
             gige::Error::Io(err) => ControlError::Io(err.into()),
             gige::Error::InvalidPacket(msg) => ControlError::InvalidData(msg.into()),
             gige::Error::InvalidData(msg) => ControlError::InvalidData(msg.into()),
+            gige::Error::InvalidAckStatus(status) => {
+                ControlError::Io(anyhow::anyhow!("{:?}", status))
+            }
         }
     }
 }
 
+// TODO: do not bind here, but only when camera is actually needed
 pub fn enumerate_cameras(
     local_addr: Ipv4Addr,
 ) -> CameleonResult<Vec<Camera<ControlHandle, StreamHandle>>> {
-    let device_infos = task::block_on(gige::enumerate_devices(local_addr, ENUMERATION_TIMEOUT))
-        .map_err(ControlError::from)?;
+    let device_infos =
+        gige::enumerate_devices(local_addr, ENUMERATION_TIMEOUT).map_err(ControlError::from)?;
 
     let mut cameras: Vec<Camera<ControlHandle, StreamHandle>> =
         Vec::with_capacity(device_infos.len());
-    for info in device_infos {
-        let camera_info = CameraInfo {
-            vendor_name: info.manufacturer_name.clone(),
-            model_name: info.model_name.clone(),
-            serial_number: info.serial_number.clone(),
-        };
-        let stream_socket = UdpSocket::bind((local_addr, 0)).map_err(Into::<StreamError>::into)?;
-        let stream_params = StreamParams {
-            host_addr: local_addr,
-            host_port: stream_socket.local_addr().unwrap().port(),
-        };
-        let strm_handle = unwrap_or_log!(StreamHandle::new(stream_socket));
-        let ctrl_handle = unwrap_or_log!(ControlHandle::new(info, stream_params));
-        cameras.push(Camera::new(ctrl_handle, strm_handle, None, camera_info));
+    for discovery in device_infos {
+        cameras.push(Camera::from_discovery(discovery, local_addr)?);
     }
 
     Ok(cameras)

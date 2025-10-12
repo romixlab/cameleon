@@ -1,7 +1,7 @@
 use cameleon::{
-    Camera,
     gige::{ControlHandle, StreamHandle},
     payload::{ImageInfo, Payload, PayloadReceiver},
+    Camera,
 };
 use cameleon_device::PixelFormat;
 use egui::{Button, CentralPanel, ColorImage, ComboBox, Label, TextureHandle, TopBottomPanel, Ui};
@@ -58,8 +58,8 @@ impl FpsCounter {
     }
 }
 
-impl std::fmt::Display for FpsCounter {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for FpsCounter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.avg {
             None => f.write_str("N/A"),
             Some(avg) => f.write_fmt(format_args!("{:.02}", avg)),

@@ -158,7 +158,7 @@ pub use camera::{Camera, CameraInfo, DeviceControl, PayloadStream};
 use std::{borrow::Cow, num::TryFromIntError};
 
 /// A specialized `Result` type for `camera::Camera`.
-pub type CameleonResult<T> = std::result::Result<T, CameleonError>;
+pub type CameleonResult<T> = Result<T, CameleonError>;
 
 /// An error type returned from the `camera::Camera`.
 #[derive(Debug, thiserror::Error)]
@@ -185,7 +185,7 @@ pub enum CameleonError {
 }
 
 /// A specialized `Result` type for device control.
-pub type ControlResult<T> = std::result::Result<T, ControlError>;
+pub type ControlResult<T> = Result<T, ControlError>;
 
 /// An error type for device control.
 #[derive(Debug, thiserror::Error)]
@@ -229,18 +229,18 @@ pub enum ControlError {
 }
 
 /// A specialized `Result` type for streaming.
-pub type StreamResult<T> = std::result::Result<T, StreamError>;
+pub type StreamResult<T> = Result<T, StreamError>;
 
 /// An error type related to payload streaming.
 #[derive(Debug, thiserror::Error)]
 pub enum StreamError {
     /// Failed to receive [`payload::Payload`].
-    #[error("failed to receive payload: {0}")]
-    ReceiveError(Cow<'static, str>),
+    #[error("failed to receive payload")]
+    ReceiveError,
 
     /// Failed to send [`payload::Payload`].
-    #[error("failed to send payload: {0}")]
-    SendError(Cow<'static, str>),
+    #[error("failed to send payload")]
+    SendError,
 
     /// Payload leader is invalid.
     #[error("invalid payload has been sent: {0}")]
@@ -276,6 +276,12 @@ pub enum StreamError {
 impl From<TryFromIntError> for ControlError {
     fn from(e: TryFromIntError) -> Self {
         Self::InvalidDevice(format!("internal data has invalid num type: {e}").into())
+    }
+}
+
+impl From<std::io::Error> for ControlError {
+    fn from(value: std::io::Error) -> Self {
+        Self::Io(value.into())
     }
 }
 

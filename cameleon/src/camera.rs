@@ -57,14 +57,17 @@
 //! camera.close().unwrap();
 //! ```
 
-use auto_impl::auto_impl;
-use tracing::info;
-
 use super::{
     genapi::{DefaultGenApiCtxt, FromXml, GenApiCtxt, ParamsCtxt},
     payload::{channel, PayloadReceiver, PayloadSender},
     CameleonError, CameleonResult, ControlResult, StreamError, StreamResult,
 };
+use crate::gige::stream_handle::StreamParams;
+use crate::gige::{ControlHandle, StreamHandle};
+use auto_impl::auto_impl;
+use cameleon_device::gige::protocol::ack::Discovery;
+use std::net::{Ipv4Addr, UdpSocket};
+use tracing::info;
 
 /// Provides easy-to-use access to a `GenICam` compatible camera.
 ///
@@ -156,7 +159,7 @@ impl<Ctrl, Strm, Ctxt> Camera<Ctrl, Strm, Ctxt> {
     /// # let mut camera = cameras.pop().unwrap();
     /// // Opens the camera before using it.
     /// camera.open().unwrap();
-    /// // .. Do something with camera.
+    /// // Do something with camera.
     /// // Closes the camera after using it.
     /// camera.close().unwrap();
     /// ```
@@ -190,7 +193,7 @@ impl<Ctrl, Strm, Ctxt> Camera<Ctrl, Strm, Ctxt> {
     /// # let mut camera = cameras.pop().unwrap();
     /// // Opens the camera before using it.
     /// camera.open().unwrap();
-    /// // .. Do something with camera.
+    /// // Do something with camera.
     /// // Closes the camera after using it.
     /// camera.close().unwrap();
     /// ```
@@ -281,7 +284,7 @@ impl<Ctrl, Strm, Ctxt> Camera<Ctrl, Strm, Ctxt> {
     /// ```
     ///
     /// # Arguments
-    /// * `cap` - A capacity of the paylaod receiver, the sender will stop to send a payload when it
+    /// * `cap` - A capacity of the payload receiver, the sender will stop to send a payload when it
     /// gets full.
     ///
     ///
@@ -303,7 +306,7 @@ impl<Ctrl, Strm, Ctxt> Camera<Ctrl, Strm, Ctxt> {
             return Err(StreamError::InStreaming.into());
         }
 
-        // Enable streaimng.
+        // Enable streaming.
         self.ctrl.enable_streaming()?;
         let mut ctxt = self.params_ctxt()?;
         expect_node!(&ctxt, "TLParamsLocked", as_integer).set_value(&mut ctxt, 1)?;
@@ -511,6 +514,28 @@ impl<Ctrl, Strm, Ctxt> Camera<Ctrl, Strm, Ctxt> {
             ctxt: Some(ctxt),
             info: self.info,
         }
+    }
+}
+
+impl Camera<ControlHandle, StreamHandle> {
+    /// Binds a new UDP socket and creates Camera from Discovery struct.
+    pub fn from_discovery(
+        discovery: Discovery,
+        local_addr: Ipv4Addr,
+    ) -> Result<Camera<ControlHandle, StreamHandle>, CameleonError> {
+        let camera_info = CameraInfo {
+            vendor_name: discovery.manufacturer_name.clone(),
+            model_name: discovery.model_name.clone(),
+            serial_number: discovery.serial_number.clone(),
+        };
+        let stream_socket = UdpSocket::bind((local_addr, 0)).map_err(Into::<StreamError>::into)?;
+        let stream_params = StreamParams {
+            host_addr: local_addr,
+            host_port: stream_socket.local_addr().unwrap().port(),
+        };
+        let strm_handle = unwrap_or_log!(StreamHandle::new(stream_socket));
+        let ctrl_handle = unwrap_or_log!(ControlHandle::new(discovery, stream_params));
+        Ok(Camera::new(ctrl_handle, strm_handle, None, camera_info))
     }
 }
 

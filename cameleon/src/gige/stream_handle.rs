@@ -13,8 +13,7 @@ use std::{
 use cameleon_device::gige::protocol::stream::{
     ImageLeader, ImageTrailer, PacketHeader, PacketType, PayloadType, PayloadTypeKind,
 };
-use futures_channel::oneshot;
-use tracing::{error, warn};
+use tracing::{debug, error, warn};
 
 use crate::{
     payload::{Payload, PayloadSender},
@@ -71,7 +70,7 @@ impl PayloadStream for StreamHandle {
         let completion = Arc::new((Mutex::new(false), Condvar::new()));
         self.completion = Some(completion.clone());
 
-        let strm_loop = StreamingLoop {
+        let stream_loop = StreamingLoop {
             // 65536 is the max UDP packet size
             // but the actual packet size is available
             // only after control handle is created
@@ -84,7 +83,7 @@ impl PayloadStream for StreamHandle {
         };
 
         thread::spawn(move || {
-            strm_loop.run();
+            stream_loop.run();
         });
         Ok(())
     }
@@ -163,7 +162,7 @@ impl StreamingLoop {
                     // the new frame
                     Err(PacketMismatch::TooOld) => continue,
                     Err(PacketMismatch::TooNew) => {
-                        tracing::warn!("Packet loss occured, frame skipped");
+                        tracing::warn!("Packet loss occurred, frame skipped");
                         builder = None;
                         continue;
                     }
@@ -181,7 +180,7 @@ impl StreamingLoop {
                         unwrap_or_continue!(PayloadType::parse_generic_leader(&mut cursor));
                     ensure_or_continue!(
                         payload_type.kind() == PayloadTypeKind::Image,
-                        "Payload type kind: {:?} not suported",
+                        "Payload type kind: {:?} not supported",
                         payload_type.kind()
                     );
                     let leader = unwrap_or_continue!(ImageLeader::parse(&mut cursor));
@@ -191,13 +190,11 @@ impl StreamingLoop {
                     builder = Some(PayloadBuilder::new(header, leader, &mut payload));
                 }
                 PacketType::Trailer => {
-                    match self.cancellation_rx.try_recv() {
-                        Ok(Some(())) | Err(_) => {
-                            *self.completion.0.lock().unwrap() = true;
-                            self.completion.1.notify_all();
-                            break;
-                        }
-                        Ok(None) => {}
+                    if self.cancellation_rx.try_recv().is_ok() {
+                        debug!("PacketType::Trailer breaking on cancellation_rx");
+                        *self.completion.0.lock().unwrap() = true;
+                        self.completion.1.notify_all();
+                        break;
                     }
                     let payload_type =
                         unwrap_or_continue!(PayloadType::parse_generic_leader(&mut cursor));
@@ -207,12 +204,12 @@ impl StreamingLoop {
                     };
                     ensure_or_continue!(
                         payload_type.kind() == PayloadTypeKind::Image,
-                        "Payload type kind: {:?} not suported",
+                        "Payload type kind: {:?} not supported",
                         payload_type.kind()
                     );
                     let _trailer = unwrap_or_continue!(ImageTrailer::parse(&mut cursor));
                     let payload = handle_packet_mismatch!(builder.build(header));
-                    unwrap_or_continue!(async_std::task::block_on(self.sender.send(Ok(payload))));
+                    unwrap_or_continue!(self.sender.send(Ok(payload)));
                 }
                 PacketType::GenericPayload => {
                     let Some(builder) = builder.as_mut() else {

@@ -2,27 +2,22 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-use std::{
-    convert::TryInto,
-    sync::{Arc, Mutex},
-    thread,
-    time::{self},
+use crate::{
+    genapi::CompressionType, utils::unzip_genxml, ControlError, ControlResult, DeviceControl,
 };
-
-use async_std::{channel, future, net::UdpSocket, task};
-use futures_channel::oneshot;
-use futures_util::{select, FutureExt};
-
 use cameleon_device::gige::{
     protocol::{ack, cmd},
     register_map::StreamChannelPort,
 };
-
-use crate::{
-    genapi::CompressionType, utils::unzip_genxml, ControlError, ControlResult, DeviceControl,
+use std::net::UdpSocket;
+use std::sync::mpsc::RecvTimeoutError;
+use std::{
+    convert::TryInto,
+    sync::{mpsc, Arc, Mutex},
+    thread,
+    time::{self},
 };
-
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use super::{
     register_map::{
@@ -48,17 +43,14 @@ pub type DeviceInfo = ack::Discovery;
 
 pub struct ControlHandle {
     inner: Arc<Mutex<ControlHandleInner>>,
-    event_tx: Option<channel::Sender<HeartbeatEvent>>,
+    event_tx: Option<mpsc::Sender<HeartbeatEvent>>,
     completion_rx: Option<oneshot::Receiver<()>>,
     info: DeviceInfo,
 }
 
 impl ControlHandle {
     pub fn new(info: DeviceInfo, stream_params: StreamParams) -> ControlResult<Self> {
-        let inner = Arc::new(Mutex::new(task::block_on(ControlHandleInner::new(
-            &info,
-            stream_params,
-        ))?));
+        let inner = Arc::new(Mutex::new(ControlHandleInner::new(&info, stream_params)?));
 
         Ok(Self {
             inner,
@@ -72,7 +64,7 @@ impl ControlHandle {
         unwrap_or_log!(Bootstrap::new().set_heartbeat_timeout(self, timeout));
         self.event_tx
             .as_ref()
-            .map(|tx| tx.try_send(HeartbeatEvent::TimeoutChanged(timeout)));
+            .map(|tx| tx.send(HeartbeatEvent::TimeoutChanged(timeout)));
 
         Ok(())
     }
@@ -101,7 +93,7 @@ impl DeviceControl for ControlHandle {
             (heartbeat_timeout, need_heartbeat)
         };
         debug!("heartbeat timeout: {:#?}", heartbeat_timeout);
-        let (event_tx, event_rx) = channel::unbounded();
+        let (event_tx, event_rx) = mpsc::channel();
         let (completion_tx, completion_rx) = oneshot::channel();
         let heartbeat_loop = HeartbeatLoop {
             inner: self.inner.clone(),
@@ -113,15 +105,21 @@ impl DeviceControl for ControlHandle {
         self.event_tx = Some(event_tx);
         self.completion_rx = Some(completion_rx);
 
-        thread::spawn(|| task::block_on(heartbeat_loop.run(completion_tx)));
+        thread::spawn(|| heartbeat_loop.run(completion_tx));
         Ok(())
     }
 
     fn close(&mut self) -> ControlResult<()> {
         match (self.event_tx.take(), self.completion_rx.take()) {
             (Some(event_tx), Some(completion_rx)) => {
-                event_tx.try_send(HeartbeatEvent::ChannelClosed).unwrap();
-                task::block_on(completion_rx).ok();
+                let r = event_tx.send(HeartbeatEvent::ChannelClosed);
+                if r.is_err() {
+                    warn!("Failed to send HeartbeatEvent::ChannelClosed");
+                }
+                let r = completion_rx.recv();
+                if r.is_err() {
+                    warn!("Failed to receive from completion_rx");
+                }
             }
             (None, None) => {}
             _ => unreachable!(),
@@ -209,14 +207,13 @@ struct ControlHandleInner {
 }
 
 impl ControlHandleInner {
-    async fn new(info: &DeviceInfo, stream_params: StreamParams) -> ControlResult<Self> {
-        let sock = UdpSocket::bind("0.0.0.0:0")
-            .await
-            .map_err(|err| ControlError::Io(err.into()))?;
+    fn new(info: &DeviceInfo, stream_params: StreamParams) -> ControlResult<Self> {
+        let sock = UdpSocket::bind("0.0.0.0:0").map_err(|err| ControlError::Io(err.into()))?;
         let peer_ip = info.ip;
         sock.connect((peer_ip, GVCP_DEFAULT_PORT))
-            .await
             .map_err(|err| ControlError::Io(err.into()))?;
+        sock.set_write_timeout(Some(INITIAL_TIMEOUT_DURATION))?;
+        sock.set_read_timeout(Some(INITIAL_TIMEOUT_DURATION))?;
 
         Ok(Self {
             sock,
@@ -256,7 +253,7 @@ impl ControlHandleInner {
         Ok(())
     }
 
-    async fn send_cmd<'a, T, U>(&'a mut self, cmd: T) -> ControlResult<U>
+    fn send_cmd<'a, T, U>(&'a mut self, cmd: T) -> ControlResult<U>
     where
         T: cmd::CommandData,
         U: ack::ParseAckData<'a>,
@@ -265,18 +262,18 @@ impl ControlHandleInner {
         let cmd_len = cmd.length() as usize;
         cmd.serialize(self.buffer.as_mut_slice())?;
 
-        self.send(cmd_len).await?;
+        self.send(cmd_len)?;
 
         let mut retry_count = self.config.retry_count;
         loop {
-            self.recv().await?;
+            self.recv()?;
             let ack = ack::AckPacket::parse(&self.buffer)?;
             self.verify_ack(&ack)?;
 
             if ack.ack_kind() == ack::AckKind::Pending {
                 let pending_ack: ack::Pending = ack.ack_data_as()?;
                 let waiting_time = pending_ack.waiting_time();
-                task::sleep(waiting_time).await;
+                thread::sleep(waiting_time);
                 retry_count -= 1;
                 if retry_count == 0 {
                     return Err(ControlError::Io(anyhow::Error::msg(
@@ -295,16 +292,12 @@ impl ControlHandleInner {
             .map_err(Into::into)
     }
 
-    async fn send(&self, len: usize) -> ControlResult<usize> {
-        timeout(self.config.timeout, self.sock.send(&self.buffer[..len]))
-            .await?
-            .map_err(Into::into)
+    fn send(&self, len: usize) -> ControlResult<usize> {
+        Ok(self.sock.send(&self.buffer[..len])?)
     }
 
-    async fn recv(&mut self) -> ControlResult<usize> {
-        timeout(self.config.timeout, self.sock.recv(&mut self.buffer))
-            .await?
-            .map_err(Into::into)
+    fn recv(&mut self) -> ControlResult<usize> {
+        Ok(self.sock.recv(&mut self.buffer)?)
     }
 
     fn verify_ack(&self, ack: &ack::AckPacket) -> ControlResult<()> {
@@ -400,7 +393,7 @@ impl DeviceControl for ControlHandleInner {
             let aligned_read_len = align!(read_len);
 
             let cmd = cmd::ReadMem::new(target_addr, aligned_read_len)?;
-            let ack: ack::ReadMem = task::block_on(self.send_cmd(cmd))?;
+            let ack: ack::ReadMem = self.send_cmd(cmd)?;
             buf_chunk.copy_from_slice(&ack.data()[..read_len as usize]);
 
             address += read_len as u64;
@@ -418,7 +411,7 @@ impl DeviceControl for ControlHandleInner {
 
         let mut cmd = cmd::ReadReg::new();
         cmd.add_entry(address)?;
-        let ack: ack::ReadReg = task::block_on(self.send_cmd(cmd))?;
+        let ack: ack::ReadReg = self.send_cmd(cmd)?;
         ack.iter()
             .next()
             .ok_or_else(|| ControlError::Io(anyhow::Error::msg("no entry in `ReadReg` ack packet")))
@@ -442,12 +435,12 @@ impl DeviceControl for ControlHandleInner {
 
             let _: ack::WriteMem = if aligned_data_len == data_chunk.len() {
                 let cmd = cmd::WriteMem::new(target_addr, data_chunk)?;
-                task::block_on(self.send_cmd(cmd))?
+                self.send_cmd(cmd)?
             } else {
                 let mut aligned_data = vec![0; aligned_data_len];
                 aligned_data[..data_chunk.len()].copy_from_slice(data_chunk);
                 let cmd = cmd::WriteMem::new(target_addr, &aligned_data)?;
-                task::block_on(self.send_cmd(cmd))?
+                self.send_cmd(cmd)?
             };
 
             address += aligned_data_len as u64;
@@ -465,7 +458,7 @@ impl DeviceControl for ControlHandleInner {
 
         let mut cmd = cmd::WriteReg::new();
         cmd.add_entry(cmd::WriteRegEntry::new(address, data)?)?;
-        let ack: ack::WriteReg = task::block_on(self.send_cmd(cmd))?;
+        let ack: ack::WriteReg = self.send_cmd(cmd)?;
 
         if ack.entry_num() == 1 {
             Ok(())
@@ -597,36 +590,36 @@ impl Default for ConnectionConfig {
 struct HeartbeatLoop {
     inner: Arc<Mutex<ControlHandleInner>>,
     timeout: time::Duration,
-    event_rx: channel::Receiver<HeartbeatEvent>,
+    event_rx: mpsc::Receiver<HeartbeatEvent>,
     need_heartbeat: bool,
 }
 
 impl HeartbeatLoop {
-    async fn run(mut self, _completion_tx: oneshot::Sender<()>) {
+    fn run(mut self, _completion_tx: oneshot::Sender<()>) {
         if self.need_heartbeat {
             loop {
-                select! {
-                    _ = task::sleep(self.timeout / 3).fuse() => {
-                        let bs = Bootstrap::new();
-                        debug!("reset heartbeat counter");
-                        if let Err(err) = bs.control_channel_priviledge(&mut *self.inner.lock().unwrap()) {
-                            error!("failed to reset heartbeat counter: {}", err);
-                        }
-                    }
-                    event = self.event_rx.recv().fuse() => {
-                        match event {
-                            Ok(HeartbeatEvent::TimeoutChanged(timeout)) => self.timeout = timeout,
-                            Ok(HeartbeatEvent::ChannelClosed) => break,
-                            Err(err) => {
-                                error!("failed to receive heartbeat event: {}", err);
+                match self.event_rx.recv_timeout(self.timeout / 3) {
+                    Ok(HeartbeatEvent::TimeoutChanged(timeout)) => self.timeout = timeout,
+                    Ok(HeartbeatEvent::ChannelClosed) => break,
+                    Err(err) => match err {
+                        RecvTimeoutError::Timeout => {
+                            let bs = Bootstrap::new();
+                            debug!("reset heartbeat counter");
+                            if let Err(err) =
+                                bs.control_channel_priviledge(&mut *self.inner.lock().unwrap())
+                            {
+                                error!("failed to reset heartbeat counter: {}", err);
                             }
                         }
-                    }
+                        RecvTimeoutError::Disconnected => {
+                            error!("failed to receive heartbeat event: {}", err);
+                        }
+                    },
                 }
             }
         } else {
             loop {
-                let event = self.event_rx.recv().await;
+                let event = self.event_rx.recv();
                 match event {
                     Ok(HeartbeatEvent::ChannelClosed) => break,
                     Ok(_) => {}
@@ -642,21 +635,6 @@ impl HeartbeatLoop {
 enum HeartbeatEvent {
     TimeoutChanged(time::Duration),
     ChannelClosed,
-}
-
-impl From<async_std::io::Error> for ControlError {
-    fn from(err: async_std::io::Error) -> Self {
-        ControlError::Io(err.into())
-    }
-}
-
-async fn timeout<F, T>(timeout: time::Duration, f: F) -> ControlResult<T>
-where
-    F: std::future::Future<Output = T>,
-{
-    future::timeout(timeout, f)
-        .await
-        .map_err(|_| ControlError::Timeout)
 }
 
 fn assert_open<Ctrl: DeviceControl>(device: Ctrl) -> ControlResult<()> {

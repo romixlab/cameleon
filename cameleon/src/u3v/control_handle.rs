@@ -514,6 +514,30 @@ impl From<ControlHandle> for SharedControlHandle {
     }
 }
 
+macro_rules! impl_shared_control_handle {
+    ($(
+            $(#[$meta:meta])*
+            $vis:vis fn $method:ident(&$self:ident $(,$arg:ident: $arg_ty:ty)*) -> $ret_ty:ty),*) => {
+        $(
+            $(#[$meta])*
+            $vis fn $method(&$self, $($arg: $arg_ty),*) -> $ret_ty {
+                $self.0.lock().unwrap().$method($($arg),*)
+            }
+        )*
+    };
+
+    ($(
+            $(#[$meta:meta])*
+            $vis:vis fn $method:ident(&mut $self:ident $(,$arg:ident: $arg_ty:ty)*) -> $ret_ty:ty),*) => {
+        $(
+            $(#[$meta])*
+            $vis fn $method(&mut $self, $($arg: $arg_ty),*) -> $ret_ty {
+                $self.0.lock().unwrap().$method($($arg),*)
+            }
+        )*
+    }
+}
+
 impl SharedControlHandle {
     impl_shared_control_handle!(
         /// Thread safe version of [`ControlHandle::buffer_capacity`].

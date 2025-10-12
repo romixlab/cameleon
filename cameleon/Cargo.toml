@@ -20,10 +20,7 @@ thiserror = "2.0"
 semver = "1.0.0"
 zip = { version = "6.0", default-features = false, features = ["deflate"] }
 sha-1 = "0.10.0"
-async-std = "1.13.0"
-async-channel = "2.5" # 1.7.0 has added recv_blocking()
-futures-channel = "0.3.16"
-futures-util = { version = "0.3.16", features = ["async-await"] }
+oneshot = "0.1"
 tracing = "0.1.26"
 auto_impl = "1.0.1"
 cameleon-device = { path = "../device", version = "0.1.14" }

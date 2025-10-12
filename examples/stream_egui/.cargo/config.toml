@@ -1,0 +1,2 @@
+[env]
+RUST_LOG = "cameleon=trace,cameleon_device=trace,cameleon_genapi=warn"

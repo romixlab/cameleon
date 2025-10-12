@@ -4,14 +4,15 @@
 
 //! This module contains types related to `Payload` sent from the device.
 //!
-//! `Payload` is an abstracted container that is mainly used to transfer an image, but also meta data of the image.
+//! `Payload` is an abstracted container that is mainly used to transfer an image, but also metadata of the image.
 //! See [`Payload`] and [`ImageInfo`] for more details.
 
 pub use cameleon_device::PixelFormat;
+use std::sync::mpsc;
 
 use std::time;
 
-use async_channel::{Receiver, Sender};
+use std::sync::mpsc::{Receiver, SyncSender};
 
 use super::{StreamError, StreamResult};
 
@@ -22,7 +23,7 @@ pub enum PayloadType {
     Image,
     /// Payload contains multiple data chunks, and its first chunk is an image.
     ImageExtendedChunk,
-    /// Payload contains multiple data chunks, no gurantee about its first chunk.
+    /// Payload contains multiple data chunks, no guarantee about its first chunk.
     Chunk,
 }
 
@@ -99,11 +100,11 @@ impl Payload {
     }
 }
 
-/// An Receiver of the `Payload` which is sent from a device.
-#[derive(Debug, Clone)]
+/// A Receiver of the `Payload` which is sent from a device.
+#[derive(Debug)]
 pub struct PayloadReceiver {
     /// Sends back `payload` to the device for reusing it.
-    tx: Sender<Payload>,
+    tx: SyncSender<Payload>,
 
     /// Receives `payload` from the device.
     rx: Receiver<StreamResult<Payload>>,
@@ -112,20 +113,20 @@ pub struct PayloadReceiver {
 impl PayloadReceiver {
     /// Receives [`Payload`] sent from the device.
     pub async fn recv(&self) -> StreamResult<Payload> {
-        self.rx.recv().await?
+        self.rx.recv().map_err(|_| StreamError::ReceiveError)?
     }
 
     /// Tries to receive [`Payload`].
     /// This method doesn't wait arrival of `payload` and immediately returns `StreamError` if
     /// the channel is empty.
     pub fn try_recv(&self) -> StreamResult<Payload> {
-        self.rx.try_recv()?
+        self.rx.try_recv().map_err(|_| StreamError::ReceiveError)?
     }
 
     /// Receives [`Payload`] sent from the device.
     /// If the channel is empty, this method blocks until the device produces the payload.
     pub fn recv_blocking(&self) -> StreamResult<Payload> {
-        self.rx.recv_blocking()?
+        self.rx.recv().map_err(|_| StreamError::ReceiveError)?
     }
 
     /// Sends back [`Payload`] to the device to reuse already allocated `payload`.
@@ -133,43 +134,43 @@ impl PayloadReceiver {
     /// Sending back `payload` may improve performance of streaming, but not required to call this
     /// method.
     pub fn send_back(&self, payload: Payload) {
-        self.tx.try_send(payload).ok();
+        self.tx.send(payload).ok();
     }
 }
 
 /// A sender of the [`Payload`] which is sent to the host.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PayloadSender {
     /// Receives from the device.
-    tx: Sender<StreamResult<Payload>>,
+    tx: SyncSender<StreamResult<Payload>>,
     /// Sends back payload to reuse it.
     rx: Receiver<Payload>,
 }
 
 impl PayloadSender {
     /// Sends [`Payload`] to the host.
-    pub async fn send(&self, payload: StreamResult<Payload>) -> StreamResult<()> {
-        Ok(self.tx.send(payload).await?)
+    pub fn send(&self, payload: StreamResult<Payload>) -> StreamResult<()> {
+        Ok(self.tx.send(payload).map_err(|_| StreamError::SendError)?)
     }
 
     /// Tries to send [`Payload`] to the host.
     /// Returns `StreamError` if the channel is full or empty.
     pub fn try_send(&self, payload: StreamResult<Payload>) -> StreamResult<()> {
-        Ok(self.tx.try_send(payload)?)
+        Ok(self.tx.send(payload).map_err(|_| StreamError::SendError)?)
     }
 
     /// Tries to receive [`Payload`].
     /// This method doesn't wait arrival of `payload` and immediately returns `StreamError` if
     /// the channel is empty.
     pub fn try_recv(&self) -> StreamResult<Payload> {
-        Ok(self.rx.try_recv()?)
+        Ok(self.rx.try_recv().map_err(|_| StreamError::ReceiveError)?)
     }
 }
 
 /// Creates [`PayloadReceiver`] and [`PayloadSender`].
 pub fn channel(payload_cap: usize, buffer_cap: usize) -> (PayloadSender, PayloadReceiver) {
-    let (device_tx, host_rx) = async_channel::bounded(payload_cap);
-    let (host_tx, device_rx) = async_channel::bounded(buffer_cap);
+    let (device_tx, host_rx) = mpsc::sync_channel(payload_cap);
+    let (host_tx, device_rx) = mpsc::sync_channel(buffer_cap);
     (
         PayloadSender {
             tx: device_tx,
@@ -180,28 +181,4 @@ pub fn channel(payload_cap: usize, buffer_cap: usize) -> (PayloadSender, Payload
             rx: host_rx,
         },
     )
-}
-
-impl From<async_channel::RecvError> for StreamError {
-    fn from(err: async_channel::RecvError) -> Self {
-        StreamError::ReceiveError(err.to_string().into())
-    }
-}
-
-impl From<async_channel::TryRecvError> for StreamError {
-    fn from(err: async_channel::TryRecvError) -> Self {
-        StreamError::ReceiveError(err.to_string().into())
-    }
-}
-
-impl<T> From<async_channel::SendError<T>> for StreamError {
-    fn from(err: async_channel::SendError<T>) -> Self {
-        StreamError::ReceiveError(err.to_string().into())
-    }
-}
-
-impl<T> From<async_channel::TrySendError<T>> for StreamError {
-    fn from(err: async_channel::TrySendError<T>) -> Self {
-        StreamError::ReceiveError(err.to_string().into())
-    }
 }
