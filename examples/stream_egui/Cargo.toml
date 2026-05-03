@@ -8,7 +8,6 @@ cameleon = { path = "../../cameleon" }
 cameleon-device = { path = "../../device" }
 egui = { version = "0.33", features = ["persistence"] }
 eframe = { version = "0.33", features = ["persistence"] }
-egui_extras = { version = "0.33", features = ["image"] }
 image = "0.25.5"
 #imageproc = "0.25.0"
 tokio = { version = "1.40.0", features = ["full"] }

@@ -150,20 +150,20 @@ pub struct PayloadSender {
 impl PayloadSender {
     /// Sends [`Payload`] to the host.
     pub fn send(&self, payload: StreamResult<Payload>) -> StreamResult<()> {
-        Ok(self.tx.send(payload).map_err(|_| StreamError::SendError)?)
+        self.tx.send(payload).map_err(|_| StreamError::SendError)
     }
 
     /// Tries to send [`Payload`] to the host.
     /// Returns `StreamError` if the channel is full or empty.
     pub fn try_send(&self, payload: StreamResult<Payload>) -> StreamResult<()> {
-        Ok(self.tx.send(payload).map_err(|_| StreamError::SendError)?)
+        self.tx.send(payload).map_err(|_| StreamError::SendError)
     }
 
     /// Tries to receive [`Payload`].
     /// This method doesn't wait arrival of `payload` and immediately returns `StreamError` if
     /// the channel is empty.
     pub fn try_recv(&self) -> StreamResult<Payload> {
-        Ok(self.rx.try_recv().map_err(|_| StreamError::ReceiveError)?)
+        self.rx.try_recv().map_err(|_| StreamError::ReceiveError)
     }
 }
 

@@ -24,10 +24,7 @@ async fn main() {
     eframe::run_native(
         "GigE streaming example",
         options,
-        Box::new(|cc| {
-            egui_extras::install_image_loaders(&cc.egui_ctx);
-            Ok(Box::new(StreamingExample::new(cc)))
-        }),
+        Box::new(|cc| Ok(Box::new(StreamingExample::new(cc)))),
     )
     .unwrap();
 }
@@ -95,7 +92,7 @@ struct Transient {
 }
 
 impl StreamingExample {
-    pub fn new(cc: &eframe::CreationContext) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut s = if let Some(storage) = cc.storage {
             eframe::get_value(storage, eframe::APP_KEY).unwrap_or_else(|| Self::default())
         } else {
@@ -136,7 +133,7 @@ impl StreamingExample {
 
     fn start_stop(t: &mut Transient, if_addr: Option<Ipv4Addr>, ui: &mut Ui) {
         if ui
-            .add_enabled(if_addr.is_some(), Button::new("Start"))
+            .add_enabled(if_addr.is_some() & t.cam.is_none(), Button::new("Start"))
             .clicked()
             && t.cam.is_none()
         {
