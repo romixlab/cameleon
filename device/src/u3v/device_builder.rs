@@ -26,7 +26,15 @@ pub fn enumerate_devices() -> Result<Vec<Device>> {
     let rusb_device_list = rusb::DeviceList::new()?;
     let builders = rusb_device_list
         .iter()
-        .filter_map(|dev| DeviceBuilder::new(dev).ok().flatten());
+        .filter_map(|dev| {
+            match DeviceBuilder::new(dev) {
+                Ok(d) => d,
+                Err(e) => {
+                    tracing::error!("{e:?}");
+                    None
+                },
+            }
+        });
 
     Ok(builders
         .filter_map(|builder| builder.build().ok())
@@ -151,6 +159,7 @@ impl DeviceBuilder {
 
         for iface in desc.interfaces() {
             for if_desc in iface.descriptors() {
+                println!("{if_desc:?}");
                 if let Some(u3v_iad) = Self::find_u3v_iad_in_if_desc(&if_desc) {
                     return Some(u3v_iad);
                 }

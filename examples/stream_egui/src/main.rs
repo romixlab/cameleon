@@ -1,8 +1,4 @@
-use cameleon::{
-    gige::{ControlHandle, StreamHandle},
-    payload::{ImageInfo, Payload, PayloadReceiver},
-    Camera,
-};
+use cameleon::{Camera, gige, payload::{ImageInfo, Payload, PayloadReceiver}, u3v, CameleonResult};
 use cameleon_device::PixelFormat;
 use egui::{Button, CentralPanel, ColorImage, ComboBox, Label, TextureHandle, TopBottomPanel, Ui};
 use image::{ImageBuffer, Rgb};
@@ -85,7 +81,15 @@ struct StreamingExample {
 
 struct Transient {
     handle: TextureHandle,
-    cam: Option<(Camera<ControlHandle, StreamHandle>, PayloadReceiver)>,
+    gige_camera: Option<(
+        Camera<gige::ControlHandle, gige::StreamHandle>,
+        PayloadReceiver,
+    )>,
+    u3v_cameras: Vec<Camera<u3v::ControlHandle, u3v::StreamHandle>>,
+    u3v_camera: Option<(
+        Camera<u3v::ControlHandle, u3v::StreamHandle>,
+        PayloadReceiver,
+    )>,
     last_im: Option<ImageInfo>,
     fps: Option<FpsCounter>,
     if_addrs: Vec<NamedInterface>,
@@ -117,13 +121,21 @@ impl StreamingExample {
             })
             .collect();
 
+        let u3v_cameras = u3v::enumerate_cameras().unwrap_or_else(|e| {
+            println!("{e:?}");
+            vec![]
+        });
+        println!("found {} u3v cameras", u3v_cameras.len());
+
         s.transient = Some(Transient {
             handle: cc.egui_ctx.load_texture(
                 "s",
                 rgb2egui(&ImageBuffer::from_vec(1, 1, vec![1, 1, 1]).unwrap()),
                 egui::TextureOptions::LINEAR,
             ),
-            cam: None,
+            gige_camera: None,
+            u3v_cameras,
+            u3v_camera: None,
             last_im: None,
             fps: None,
             if_addrs,
@@ -133,18 +145,34 @@ impl StreamingExample {
 
     fn start_stop(t: &mut Transient, if_addr: Option<Ipv4Addr>, ui: &mut Ui) {
         if ui
-            .add_enabled(if_addr.is_some() & t.cam.is_none(), Button::new("Start"))
+            .add_enabled(if_addr.is_some() && t.gige_camera.is_none(), Button::new("Start GigE"))
             .clicked()
-            && t.cam.is_none()
+            && t.gige_camera.is_none()
         {
-            t.cam = Some(get_camera(if_addr.expect("")));
+            t.gige_camera = Some(get_first_gige_camera(if_addr.expect("")));
             t.fps = Some(FpsCounter::new());
         }
-        if ui.button("Stop").clicked() && t.cam.is_some() {
-            let (mut cam, _) = t.cam.take().unwrap();
-            cam.stop_streaming().unwrap();
-            cam.close().unwrap();
-            t.cam = None;
+        if ui
+            .add_enabled(
+                !t.u3v_cameras.is_empty() && t.u3v_camera.is_none(),
+                Button::new("Start U3V"),
+            )
+            .clicked()
+        {
+            let mut camera = t.u3v_cameras.pop().expect("");
+            camera.open().unwrap();
+            let payload_rx = camera.start_streaming(3).unwrap();
+            t.u3v_camera = Some((camera, payload_rx));
+        }
+        if ui.add_enabled(t.gige_camera.is_some() || t.u3v_camera.is_some(), Button::new("Stop")).clicked() {
+            if let Some((mut cam, _)) = t.gige_camera.take() {
+                cam.stop_streaming().unwrap();
+                cam.close().unwrap();
+            }
+            if let Some((mut cam, _)) = t.u3v_camera.take() {
+                cam.stop_streaming().unwrap();
+                cam.close().unwrap();
+            }
             t.last_im = None;
             t.fps = None;
         }
@@ -205,10 +233,13 @@ impl eframe::App for StreamingExample {
             let txt = egui::load::SizedTexture::from_handle(&t.handle);
             ui.add(egui::Image::from_texture(txt).shrink_to_fit());
 
-            let Some((_, prx)) = t.cam.as_ref() else {
-                return;
+            let buf = match (t.gige_camera.as_ref(), t.u3v_camera.as_ref()) {
+                (Some((_cam, prx)), None) => prx.try_recv(),
+                (None, Some((_cam, prx))) => prx.try_recv(),
+                _ => {
+                    return;
+                }
             };
-            let buf = prx.try_recv();
             let Ok(buf) = buf else {
                 return;
             };
@@ -253,8 +284,13 @@ fn rgb2egui(rgb: &ImageBuffer<Rgb<u8>, Vec<u8>>) -> ColorImage {
     ColorImage::from_rgb([rgb.width() as usize, rgb.height() as usize], rgb)
 }
 
-fn get_camera(ip_addr: Ipv4Addr) -> (Camera<ControlHandle, StreamHandle>, PayloadReceiver) {
-    let mut camera = cameleon::gige::enumerate_cameras(ip_addr)
+fn get_first_gige_camera(
+    ip_addr: Ipv4Addr,
+) -> (
+    Camera<gige::ControlHandle, gige::StreamHandle>,
+    PayloadReceiver,
+) {
+    let mut camera = gige::enumerate_cameras(ip_addr)
         .unwrap()
         .swap_remove(0);
     camera.open().unwrap();

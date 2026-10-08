@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-cameleon = { path = "../../cameleon" }
+cameleon = { path = "../../cameleon", features = ["libusb"] }
 cameleon-device = { path = "../../device" }
 egui = { version = "0.33", features = ["persistence"] }
 eframe = { version = "0.33", features = ["persistence"] }
